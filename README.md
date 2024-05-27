@@ -1,3 +1,3 @@
 # protoc-gen-http-go
 
-Generate http handler form protobuf
+Generate native http handler form protobuf

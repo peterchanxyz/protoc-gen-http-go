@@ -3,16 +3,19 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
-var (
+const (
 	bytesPackage   = protogen.GoImportPath("bytes")
 	contextPackage = protogen.GoImportPath("context")
+	base64Package  = protogen.GoImportPath("encoding/base64")
 	errorsPkg      = protogen.GoImportPath("errors")
 	jsonPackage    = protogen.GoImportPath("encoding/json")
 	fmtPackage     = protogen.GoImportPath("fmt")
@@ -25,7 +28,7 @@ var (
 )
 
 // generateFile generates a _gin.pb.go file.
-func generateFile(gen *protogen.Plugin, file *protogen.File) *protogen.GeneratedFile {
+func generateFile(gen *protogen.Plugin, file *protogen.File) (err error) {
 	if len(file.Services) == 0 {
 		return nil
 	}
@@ -38,24 +41,33 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) *protogen.Generated
 	g.P()
 
 	for _, service := range file.Services {
-		genService(g, service)
+		err = genService(g, service)
+		if err != nil {
+			return
+		}
 	}
-	return g
+	return
 }
 
-func genService(g *protogen.GeneratedFile, s *protogen.Service) {
+func genService(g *protogen.GeneratedFile, s *protogen.Service) (err error) {
+	// service server interface
+	g.P("// ", s.GoName, "Server is the server API for ", s.GoName, " service.")
 	if isDeprecatedService(s) {
 		g.P("//")
 		deprecated(g)
 	}
-
-	// service server interface
-	g.P("// ", s.GoName, "Server is the server API for ", s.GoName, " service.")
 	g.P("type ", s.GoName, "Server interface {")
 
 	for _, method := range s.Methods {
 		if method.Desc.IsStreamingClient() || method.Desc.IsStreamingServer() {
 			continue
+		}
+
+		if comment := method.Comments.Leading.String(); comment != "" {
+			g.P(strings.TrimSpace(comment))
+		}
+		if isDeprecatedMethod(method) {
+			deprecated(g)
 		}
 		g.P("    ", method.GoName, "(", contextPackage.Ident("Context"), ", *", method.Input.GoIdent, ") (*", method.Output.GoIdent, ", error)")
 	}
@@ -88,8 +100,12 @@ func genService(g *protogen.GeneratedFile, s *protogen.Service) {
 		if method.Desc.IsStreamingClient() || method.Desc.IsStreamingServer() {
 			continue
 		}
-		genMethod(g, method)
+		err = genMethod(g, method)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
@@ -103,14 +119,18 @@ func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
 	rule, ok := proto.GetExtension(m.Desc.Options(), annotations.E_Http).(*annotations.HttpRule)
 	if ok {
 		httpMtd, pattern = buildHTTPRule(m, rule)
-		pathParams, err = parsePathParam(pattern)
-		if err != nil {
-			return err
-		}
+
 	} else {
 		httpMtd = "POST"
 		pattern = m.GoName
 	}
+
+	pathParams, err = parsePathParam(pattern)
+	if err != nil {
+		return err
+	}
+
+	queryParams := createQueryParams(m)
 
 	g.P("func ", m.GoName, "Handler(srv ", m.Parent.GoName, "Server) (pattern string, hdr ", httpPackage.Ident("Handler"), ") {")
 	g.P("	pattern = ", "\"", httpMtd, " ", pattern, "\"")
@@ -130,6 +150,16 @@ func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
 		g.P("				writeErr(w, err)")
 		g.P("				return")
 		g.P("			}")
+	} else {
+		for _, t := range queryParams {
+			for _, pat := range pathParams {
+				if t.GoName == pat.GoName {
+					goto bypassed
+				}
+			}
+			genQueryString(g, t)
+		bypassed:
+		}
 	}
 
 	for _, t := range pathParams {
@@ -213,4 +243,215 @@ func buildHTTPRule(m *protogen.Method, rule *annotations.HttpRule) (method strin
 		method = pattern.Custom.Kind
 	}
 	return
+}
+
+func genQueryString(g *protogen.GeneratedFile, queryParam *queryParam) {
+	switch queryParam.Desc.Kind() {
+	case protoreflect.BoolKind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]bool, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseBool"), "(v)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, c)")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseBool"), "(v)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = c")
+			g.P("}")
+		}
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]int32, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseInt"), "(v, 10, 32)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, int32(c))")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseInt"), "(v, 10, 32)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = int32(c)")
+			g.P("}")
+		}
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]uint32, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseUint"), "(v, 10, 32)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, uint32(c))")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseUint"), "(v, 10, 32)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = uint32(c)")
+			g.P("}")
+		}
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]int64, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseInt"), "(v, 10, 64)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, c)")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseInt"), "(v, 10, 64)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = c")
+			g.P("}")
+		}
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]uint64, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseUint"), "(v, 10, 64)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, c)")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseUint"), "(v, 10, 64)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = c")
+			g.P("}")
+		}
+	case protoreflect.FloatKind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]float32, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseFloat"), "(v, 32)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, float32(c))")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseFloat"), "(v, 32)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = float32(c)")
+			g.P("}")
+		}
+	case protoreflect.DoubleKind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]float64, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", strconvPackage.Ident("ParseFloat"), "(v, 64)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, c)")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", strconvPackage.Ident("ParseFloat"), "(v, 64)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = c")
+			g.P("}")
+		}
+	case protoreflect.StringKind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([]string, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		arr = append(arr, v)")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	in.", queryParam.GoName, " = v")
+			g.P("}")
+		}
+	case protoreflect.BytesKind:
+		if queryParam.Desc.IsList() {
+			g.P("if repeated := r.URL.Query()[\"", queryParam.Name, "\"]; len(repeated) != 0 {")
+			g.P("	arr := make([][]byte, 0, len(repeated))")
+			g.P("	for _, v := range repeated {")
+			g.P("		c, err := ", base64Package.Ident("StdEncoding.DecodeString"), "(v)")
+			g.P("		if err != nil {")
+			g.P("			writeErr(w, err)")
+			g.P("			return")
+			g.P("		}")
+			g.P("		arr = append(arr, c)")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = arr")
+			g.P("}")
+		} else {
+			g.P("if v := r.URL.Query().Get(\"", queryParam.Name, "\"); v != \"\" {")
+			g.P("	c, err := ", base64Package.Ident("StdEncoding.DecodeString"), "(v)")
+			g.P("	if err != nil {")
+			g.P("		writeErr(w, err)")
+			g.P("		return")
+			g.P("	}")
+			g.P("	in.", queryParam.GoName, " = c")
+			g.P("}")
+		}
+	}
 }

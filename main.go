@@ -30,7 +30,10 @@ func main() {
 			if !f.Generate {
 				continue
 			}
-			generateFile(gen, f)
+			err := generateFile(gen, f)
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
