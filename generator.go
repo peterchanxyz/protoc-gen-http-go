@@ -141,11 +141,12 @@ func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
 	g.P("    pattern = ", "\"", httpMtd, " ", pattern, "\"")
 	g.P("    hdr = ", httpPackage.Ident("HandlerFunc"), "(func(w ", httpPackage.Ident("ResponseWriter"), ", r *", httpPackage.Ident("Request"), ") {")
 	g.P("        ctx := r.Context()")
-	g.P()
 	g.P("        in := &", m.Input.GoIdent, "{}")
+	g.P("        var err error")
 
 	if httpMtd != "GET" {
-		g.P("        reqba, err := ", ioPackage.Ident("ReadAll"), "(r.Body)")
+		g.P("        var reqba []byte")
+		g.P("        reqba, err = ", ioPackage.Ident("ReadAll"), "(r.Body)")
 		g.P("        if err != nil {")
 		g.P("            writeErr(w, err)")
 		g.P("            return")
@@ -166,7 +167,7 @@ func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
 	for _, t := range pathParams {
 		g.P("in.", t.GoName, " = r.PathValue(\"", t.Name, "\")")
 	}
-
+	
 	g.P("		out, err := srv.", m.GoName, "(ctx, in)")
 	g.P("		if err != nil {")
 	g.P("			writeErr(w, err)")
