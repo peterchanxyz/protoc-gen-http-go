@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package testv1;
+
+import "gnostic/openapi/v3/annotations.proto";
+import "google/api/annotations.proto";
+
+message GameLaunchInput {
+  string id = 1;
+}
+
+message GameLaunchResult {
+
+}
+
+service TestService {
+
+    rpc GameLaunch(GameLaunchInput) returns (GameLaunchResult) {
+      option (google.api.http) = {
+        post: "/api/v1/gamelaunch/{id}"
+        body: "*"
+      };
+    }
+
+}

@@ -1,0 +1,44 @@
+# Generated with protoc-gen-openapi
+# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
+
+openapi: 3.0.3
+info:
+    title: TestService API
+    version: 0.0.1
+paths:
+    /api/v1/gamelaunch/{id}:
+        post:
+            tags:
+                - TestService
+            operationId: TestService_GameLaunch
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/goapipb.GameLaunchInput'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/goapipb.GameLaunchResult'
+components:
+    schemas:
+        goapipb.GameLaunchInput:
+            type: object
+            properties:
+                id:
+                    type: string
+        goapipb.GameLaunchResult:
+            type: object
+            properties: {}
+tags:
+    - name: TestService

@@ -1,0 +1,25 @@
+version: v2
+managed:
+  enabled: true
+  disable:
+    - file_option: go_package
+      module: buf.build/googleapis/googleapis
+  override:
+    - file_option: go_package_prefix
+      value: github.com/peterchanxyz/protoc-gen-http-go/example/gen/go
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen/go
+    opt: paths=source_relative
+  - local: protoc-gen-http-go
+    out: gen/go
+    opt: paths=source_relative
+  - local: protoc-gen-openapi
+    out: docs
+    opt:
+      - output_mode=source_relative
+      - version=0.0.1
+      - fq_schema_naming=true
+      - naming=proto
+      - enum_type=string
+      - default_response=false
