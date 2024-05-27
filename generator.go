@@ -170,7 +170,7 @@ func genWriteRsp(g *protogen.GeneratedFile) {
 	g.P("	 w.WriteHeader(", httpPackage.Ident("StatusOK"), ")")
 	g.P("	 respba, err := ", jsonPackage.Ident("Marshal"), "(resp)")
 	g.P("	 if err != nil {")
-	g.P("		w.WriteErr(w, err)")
+	g.P("		writeErr(w, err)")
 	g.P("		return")
 	g.P("    }")
 	g.P("	 w.Write(respba)")
