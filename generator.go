@@ -156,7 +156,7 @@ func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
 		g.P("            return")
 		g.P("        }")
 	} else {
-		g.P("        err = queryDecoder.Decode(in, r.URL.Query())")
+		g.P("        err := queryDecoder.Decode(in, r.URL.Query())")
 		g.P("        if err != nil {")
 		g.P("            writeErr(w, err)")
 		g.P("            return")
