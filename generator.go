@@ -42,7 +42,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) (err error) {
 	g.P(")")
 	g.P()
 	g.P("func init() {")
-	g.P("    queryDecoder.SetAliasTag(\"json\"")
+	g.P("    queryDecoder.SetAliasTag(\"json\")")
 	g.P("    queryDecoder.IgnoreUnknownKeys(true)")
 	g.P("}")
 	g.P()
