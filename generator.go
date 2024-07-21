@@ -193,7 +193,7 @@ func genWriteErr(g *protogen.GeneratedFile) {
 	g.P("    }")
 	g.P("	 jenc := ", jsonPackage.Ident("NewEncoder"), "(w)")
 	g.P("	 jenc.SetEscapeHTML(false)")
-	g.P("	 jenc.Encode(resp)")
+	g.P("	 jenc.Encode(errRst)")
 	g.P("}")
 }
 
