@@ -167,7 +167,7 @@ func genMethod(g *protogen.GeneratedFile, m *protogen.Method) (err error) {
 	for _, t := range pathParams {
 		g.P("in.", t.GoName, " = r.PathValue(\"", t.Name, "\")")
 	}
-	
+
 	g.P("		out, err := srv.", m.GoName, "(ctx, in)")
 	g.P("		if err != nil {")
 	g.P("			writeErr(w, err)")
@@ -191,8 +191,9 @@ func genWriteErr(g *protogen.GeneratedFile) {
 	g.P("    if cerr, ok := err.(interface{ Code() int }); ok {")
 	g.P("        errRst[\"code\"] = cerr.Code()")
 	g.P("    }")
-	g.P("	respba, _ := ", jsonPackage.Ident("Marshal"), "(errRst)")
-	g.P("	 w.Write(respba)")
+	g.P("	 jenc := ", jsonPackage.Ident("NewEncoder"), "(w)")
+	g.P("	 jenc.SetEscapeHTML(false)")
+	g.P("	 jenc.Encode(resp)")
 	g.P("}")
 }
 
@@ -200,12 +201,9 @@ func genWriteRsp(g *protogen.GeneratedFile) {
 	g.P("func writeRsp(w ", httpPackage.Ident("ResponseWriter"), ", resp any) {")
 	g.P("	 w.Header().Set(\"Content-Type\", \"application/json\")")
 	g.P("	 w.WriteHeader(", httpPackage.Ident("StatusOK"), ")")
-	g.P("	 respba, err := ", jsonPackage.Ident("Marshal"), "(resp)")
-	g.P("	 if err != nil {")
-	g.P("		writeErr(w, err)")
-	g.P("		return")
-	g.P("    }")
-	g.P("	 w.Write(respba)")
+	g.P("	 jenc := ", jsonPackage.Ident("NewEncoder"), "(w)")
+	g.P("	 jenc.SetEscapeHTML(false)")
+	g.P("	 jenc.Encode(resp)")
 	g.P("}")
 }
 
