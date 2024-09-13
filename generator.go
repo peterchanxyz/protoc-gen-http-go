@@ -187,7 +187,7 @@ func genWriteErr(g *protogen.GeneratedFile) {
 	g.P("    w.Header().Set(\"Content-Type\", \"application/json\")")
 	g.P("	 w.WriteHeader(", httpPackage.Ident("StatusBadRequest"), ")")
 	g.P("    errRst := map[string]any{}")
-	g.P("    errRst[\"msg\"] = err.Error()")
+	g.P("    errRst[\"message\"] = err.Error()")
 	g.P("    if cerr, ok := err.(interface{ Code() int }); ok {")
 	g.P("        errRst[\"code\"] = cerr.Code()")
 	g.P("    }")
